@@ -77,10 +77,10 @@ async def websocket_endpoint(ws: WebSocket):
                             await ws.send_text(ErrorMessage(detail = "Invalid JSON"))
 
                 elif message["type"] == "websocket.disconnect":
-                    if session.transcription_client.active:
+                    if session.transcription_client and session.transcription_client.active:
                         await session.transcription_client.cancel()
                     break
 
     except WebSocketDisconnect:
-        if session.transcription_client:
+        if session.transcription_client and session.transcription_client.active:
             await session.transcription_client.cancel()
