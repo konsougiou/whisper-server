@@ -10,15 +10,17 @@ from faster_whisper import WhisperModel
 from src.models.messages import ErrorMessage, TranscriptionSegmentMessage
 from src.utils import wrap_pcm_as_wav
 
+WORD_OVERLAP_MARGIN_SECONDS = 0.1
+
 class SlidingWindowAudioBuffer:
-    def __init__(self, max_size: int, chunk_size: int):
-        self.max_size = max_size
+    def __init__(self, capacity: int, emit_threshold_bytes : int):
+        self.capacity = capacity
         self.queue = deque()
         self.lock = asyncio.Lock()
         self.stopped = False
         self.buffer_size = 0
         self.total_size = 0
-        self.accum_since_last_yield_threshold = chunk_size
+        self.emit_threshold_bytes = emit_threshold_bytes
         self.accum_since_last_yield = 0
 
     async def append(self, data: bytes):
@@ -31,6 +33,9 @@ class SlidingWindowAudioBuffer:
     def stop(self):
         self.stopped = True
 
+    def is_drained(self):
+        return self.stopped and self.buffer_size == 0
+
     def __aiter__(self):
         return self
 
@@ -38,10 +43,10 @@ class SlidingWindowAudioBuffer:
         while True:
             await asyncio.sleep(0.01)
             async with self.lock:
-                if self.accum_since_last_yield >= self.accum_since_last_yield_threshold:
+                if self.accum_since_last_yield >= self.emit_threshold_bytes:
                     chunk = b''.join(self.queue)
                     self.accum_since_last_yield = 0
-                    while self.buffer_size > self.max_size:
+                    while self.buffer_size > self.capacity:
                         tail = self.queue.popleft()
                         tail_size = len(tail)
                         self.buffer_size -= tail_size
@@ -64,7 +69,8 @@ class TranscriptionClient():
         model: WhisperModel, 
         ws: WebSocket, 
         language = "en", 
-        transcript_interval_seconds: float = 1.0,
+        transmit_interval_seconds: float = 2.0,
+        context_delay_seconds: float = 1.0,
         audio_lookback_seconds: float = 4.0,
         sample_rate = 16000,
         sample_width = 2,
@@ -76,15 +82,15 @@ class TranscriptionClient():
         self.sample_width = sample_width
         self.channels = channels
 
-        self.chunk_size = transcript_interval_seconds * sample_rate * sample_width * self.channels
-        buffer_max_size = audio_lookback_seconds * sample_rate * sample_width * self.channels
+        buffer_capacity_bytes = audio_lookback_seconds * sample_rate * sample_width * self.channels
+        self.context_delay_seconds = context_delay_seconds
 
-        self.audiobuffer = SlidingWindowAudioBuffer(max_size=buffer_max_size, chunk_size=self.chunk_size)
-        self.stop_flag = False
+        emit_threshold_bytes = (transmit_interval_seconds - context_delay_seconds) * sample_rate * sample_width * self.channels
+        self.audiobuffer = SlidingWindowAudioBuffer(capacity=buffer_capacity_bytes, emit_threshold_bytes=emit_threshold_bytes)
         self.executor = executor
         self.model = model
         self.ws = ws
-        self.latest_segment_end_timestamp: float = 0
+        self.latest_sent_segment_end_timestamp: float = 0
         self.active = False
 
     async def start(self) -> None:
@@ -120,7 +126,9 @@ class TranscriptionClient():
                 sample_width=self.sample_width,
                 channels=self.channels
             )
-            buffer_tail_timestamp = (self.audiobuffer.total_size - len(chunk)) / (self.sample_rate * self.sample_width * self.channels)
+            buffer_tail_ts = (self.audiobuffer.total_size - len(chunk)) / (self.sample_rate * self.sample_width * self.channels)
+
+            buffer_cuttoff_ts = (self.audiobuffer.total_size) / (self.sample_rate * self.sample_width * self.channels) - self.context_delay_seconds
 
             try:
                 segments, _ = await loop.run_in_executor(
@@ -132,44 +140,45 @@ class TranscriptionClient():
                     )
                 )
 
-                dedup_needed = True    
-
                 for seg in segments:
-                    seg_start_ts = seg.start + buffer_tail_timestamp
-                    seg_end_ts = seg.end + buffer_tail_timestamp
+                    seg_start_ts = seg.start + buffer_tail_ts
+                    seg_end_ts = seg.end + buffer_tail_ts
 
-                    if not dedup_needed:
-                        msg = TranscriptionSegmentMessage(
-                            text=seg.text,
-                            start=seg_start_ts,
-                            end=seg_end_ts,
-                        )
-                        await self.ws.send_text(msg.json())
-                        self.latest_segment_end_timestamp = seg_end_ts
-                    elif seg_end_ts < self.latest_segment_end_timestamp:
+                    if seg_end_ts < self.latest_sent_segment_end_timestamp:
                         continue
                     else:
-                        deduped_text = ""
+                        text = ""
                         for word in seg.words:
-                            if not dedup_needed:
-                                deduped_text += word.word
+                            word_start_ts = word.start + buffer_tail_ts 
+                            word_end_ts = word.end + buffer_tail_ts
+
+                            if word_start_ts > buffer_cuttoff_ts and not self.audiobuffer.is_drained():
+                                break
+
+                            if word_start_ts + WORD_OVERLAP_MARGIN_SECONDS < self.latest_sent_segment_end_timestamp:
                                 continue
 
-                            word_start_ts = word.start + buffer_tail_timestamp
+                            text += word.word
+                            self.latest_sent_segment_end_timestamp = word_end_ts
 
-                            if word_start_ts < self.latest_segment_end_timestamp:
-                                continue
+                        else:
+                            if text:
+                                msg = TranscriptionSegmentMessage(
+                                    text=text,
+                                    start=word_start_ts,
+                                    end=word_end_ts,
+                                )
+                                await self.ws.send_text(msg.json())
+                            continue
 
-                            deduped_text += word.word
-                            dedup_needed = False
-
-                        msg = TranscriptionSegmentMessage(
-                            text=deduped_text,
-                            start=seg_start_ts,
-                            end=seg_end_ts,
-                        )
-                        await self.ws.send_text(msg.json())
-                        self.latest_segment_end_timestamp = seg_end_ts
+                        if text:
+                            msg = TranscriptionSegmentMessage(
+                                text=text,
+                                start=word_start_ts,
+                                end=word_end_ts,
+                            )
+                            await self.ws.send_text(msg.json())
+                        break
 
             except Exception as e:
                 msg = ErrorMessage(detail=str(e))

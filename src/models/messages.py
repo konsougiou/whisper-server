@@ -7,7 +7,8 @@ class BaseMessage(BaseModel):
     type: str
 
 class OpenParameters(BaseModel):
-    transcript_interval_seconds: float
+    transmit_interval_seconds: float
+    context_delay_seconds: float
     audio_lookback_seconds: float
     language: str
     sample_rate: int
