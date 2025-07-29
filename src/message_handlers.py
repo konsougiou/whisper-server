@@ -1,10 +1,10 @@
 from fastapi import WebSocket
 
-from src.models.messages import CloseMessage, ClosedMessage, ClosingMessage, OpenMessage, ErrorMessage, OpenedMessage
-from src.models.session import Session, SessionState
-from src.transcription_client import TranscriptionClient
+from models.messages import CloseMessage, ClosedMessage, ClosingMessage, OpenMessage, ErrorMessage, OpenedMessage
+from models.session import Session, SessionState
+from transcription_client import TranscriptionClient
 
-from src.context import executor, whisper_model
+from context import executor, whisper_model
 
 async def handle_open_message(session: Session, ws: WebSocket, message: OpenMessage):
 

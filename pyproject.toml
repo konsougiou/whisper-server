@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whisper-server"
+version = "0.1.0"
+description = "Realtime whisper server"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi==0.116.1",
+    "faster_whisper==1.1.1",
+    "pydantic==2.11.7"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyaudio",
+    "uvicorn",
+    "websockets",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Literal
 
-from src.models.enums import DisconnectReason
+from models.enums import DisconnectReason
 
 class BaseMessage(BaseModel):
     type: str

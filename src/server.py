@@ -1,29 +1,27 @@
-from concurrent.futures import ThreadPoolExecutor
 import json
-import os
+
 from asyncio import Semaphore
 from typing import Callable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from faster_whisper import WhisperModel
 from pydantic import ValidationError
 
-from src.models.session import Session
-from src.models.messages import (
+from models.session import Session
+from models.messages import (
     ErrorMessage,
     OpenMessage,
     CloseMessage,
     DisconnectMessage,
     BaseMessage,
 )
-from src.models.enums import ClientMessageType
-from src.message_handlers import (
+from models.enums import ClientMessageType
+from message_handlers import (
     handle_open_message,
     handle_close_message,
     handle_bytes,
     handle_disconnect_message,
 )
-from src.context import MAX_CONNECTIONS
+from context import MAX_CONNECTIONS
 
 connection_semaphore = Semaphore(MAX_CONNECTIONS)
 

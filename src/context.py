@@ -6,4 +6,4 @@ MAX_CONNECTIONS = int(os.getenv("MAX_WS_CONNECTIONS", 4))
 
 executor = ThreadPoolExecutor(max_workers=MAX_CONNECTIONS)
 
-whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")

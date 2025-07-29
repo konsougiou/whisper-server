@@ -1,14 +1,13 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import json
 from collections import deque
 
 from fastapi import WebSocket
 from faster_whisper import WhisperModel
 
-from src.models.messages import ErrorMessage, TranscriptionSegmentMessage
-from src.utils import wrap_pcm_as_wav
+from models.messages import ErrorMessage, TranscriptionSegmentMessage
+from utils import wrap_pcm_as_wav
 
 WORD_OVERLAP_MARGIN_SECONDS = 0.1
 
